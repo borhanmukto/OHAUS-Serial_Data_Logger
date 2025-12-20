@@ -40,7 +40,9 @@ Before running this application, ensure you have the following installed on your
 
 ⚠️ If the command above fails (Command not found)
 
-If you see an error saying 'pip' is not recognized, it means Python was not added to your system PATH. Use this command instead; Bash `py -m pip install streamlit pyserial pandas openpyxl`
+If you see an error saying 'pip' is not recognized, it means Python was not added to your system PATH. Use this command instead:
+
+Bash `py -m pip install streamlit pyserial pandas openpyxl`
 
 _(Note: We use pyserial, not serial. If you mistakenly installed serial, uninstall it first.)_
         
