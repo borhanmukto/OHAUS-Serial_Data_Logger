@@ -36,9 +36,7 @@ Before running this application, ensure you have the following installed on your
         
     *   Run the following commands:
       
-3.  Bash
-   
-   `pip install streamlit pyserial pandas openpyxl`
+3.  Bash `pip install streamlit pyserial pandas openpyxl`
 
 ⚠️ If the command above fails (Command not found)
 
