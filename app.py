@@ -17,18 +17,8 @@ st.set_page_config(
 # --- Custom CSS for Centering ---
 st.markdown("""
     <style>
-    /* 1. Center all standard headings */
-    h1, h2, h3 {
-        text-align: center !important;
-    }
-
-    /* 2. Center text inside all alert boxes */
-    .stAlert > div {
-        justify-content: center;
-        text-align: center;
-    }
-
-    /* 3. Custom Card Style for Metrics */
+    h1, h2, h3 { text-align: center !important; }
+    .stAlert > div { justify-content: center; text-align: center; }
     .metric-card {
         background-color: #f8f9fa;
         border: 1px solid #e9ecef;
@@ -38,31 +28,15 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         margin-bottom: 10px;
     }
-    .metric-label {
-        font-size: 16px;
-        color: #6c757d;
-        margin-bottom: 5px;
-        font-weight: 500;
-    }
-    .metric-value {
-        font-size: 28px;
-        font-weight: bold;
-        color: #212529;
-        margin: 0;
-    }
-    .metric-sub {
-        font-size: 14px;
-        color: #495057;
-        margin-top: 5px;
-    }
+    .metric-label { font-size: 16px; color: #6c757d; margin-bottom: 5px; font-weight: 500; }
+    .metric-value { font-size: 28px; font-weight: bold; color: #212529; margin: 0; }
+    .metric-sub { font-size: 14px; color: #495057; margin-top: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- Session State Initialization ---
 if 'logging_active' not in st.session_state:
     st.session_state['logging_active'] = False
-# We use session state to persist "Sheet Index" and "Current Row Count" 
-# so we don't have to read the massive Excel file every time we write.
 if 'sheet_index' not in st.session_state:
     st.session_state['sheet_index'] = 1
 if 'row_count' not in st.session_state:
@@ -84,30 +58,23 @@ def make_card_html(label, value, sub_text=""):
     """
 
 def save_to_excel_optimized(filename, data, max_rows, current_sheet_idx, current_row_cnt):
-    """
-    Optimized Saver: Uses passed-in row counts instead of reading the file.
-    Returns: (success, new_sheet_index, new_row_count)
-    """
+    """Optimized Saver: Uses passed-in row counts instead of reading the file."""
     if not data:
         return False, current_sheet_idx, current_row_cnt
     
     df_batch = pd.DataFrame(data)
     batch_len = len(df_batch)
     
-    # Logic to switch sheets if this batch would overflow
     if current_row_cnt + batch_len > max_rows:
         current_sheet_idx += 1
         current_row_cnt = 0
         write_header = True
         start_row = 0
     else:
-        # If it's a new file or new sheet (row_count 0), write header
         write_header = (current_row_cnt == 0)
         start_row = current_row_cnt + (1 if not write_header else 0)
 
     sheet_name = f"Sheet{current_sheet_idx}"
-    
-    # Check if file exists to determine mode
     mode = 'a' if os.path.exists(filename) else 'w'
     if_sheet_exists = 'overlay' if mode == 'a' else None
 
@@ -132,18 +99,24 @@ if st.sidebar.button("Refresh Ports"):
     st.rerun()
 
 available_ports = get_available_ports()
-if available_ports:
+force_manual = st.sidebar.checkbox("My port is not listed / Enter manually")
+
+if available_ports and not force_manual:
     serial_port = st.sidebar.selectbox("Serial Port", available_ports, index=0)
 else:
-    st.sidebar.warning("No COM ports detected.")
-    serial_port = st.sidebar.text_input("Manually Enter Port", "COM5")
+    # Manual Entry Mode
+    if not available_ports:
+        st.sidebar.warning("No COM ports detected automatically.")
+    
+    raw_port = st.sidebar.text_input("Manually Enter Port (e.g., COM4)", "COM4")
+    # CRITICAL FIX: Strip spaces and ensure uppercase for Windows consistency
+    serial_port = raw_port.strip().upper() 
 
 baud_rate = st.sidebar.number_input("Baud Rate", value=9600, step=100)
 output_filename = st.sidebar.text_input("Output Filename", "Desorption_Data.xlsx")
 
 st.sidebar.subheader("Performance Settings")
-# INCREASED DEFAULT BATCH SIZE for 500Hz data
-batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=2000, min_value=100, step=100, help="For 500Hz, use at least 2000-5000.")
+batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=2000, min_value=100, step=100)
 max_rows_per_sheet = st.sidebar.number_input("Max Rows Per Sheet", value=800000)
 
 # --- Main UI ---
@@ -183,11 +156,9 @@ if stop_btn:
 
 if start_btn:
     st.session_state['logging_active'] = True
-    # Reset tracking on start (optional: or logic to append to existing)
     st.session_state['sheet_index'] = 1
     st.session_state['row_count'] = 0
     
-    # Check if file exists to initialize row count correctly (Basic check)
     if os.path.exists(output_filename):
         try:
             with pd.ExcelFile(output_filename) as xls:
@@ -198,20 +169,21 @@ if start_btn:
                 df_last = pd.read_excel(xls, sheet_name=last_sheet)
                 st.session_state['row_count'] = len(df_last)
         except:
-            pass # Start fresh if error reading
+            pass 
 
 if st.session_state['logging_active']:
     
     status_placeholder.markdown(make_card_html("Status", "Connecting...", "Initializing"), unsafe_allow_html=True)
     
     try:
+        # Try to open the port
         ser = serial.Serial(
             port=serial_port,
             baudrate=baud_rate,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
             bytesize=serial.EIGHTBITS,
-            timeout=0.1 # Short timeout for non-blocking feel
+            timeout=0.1
         )
         
         # Send Command
@@ -227,16 +199,12 @@ if st.session_state['logging_active']:
         
         while True:
             try:
-                # 1. READ ALL AVAILABLE DATA (High Speed Optimization)
-                # Instead of reading 1 line, we read everything in the hardware buffer
                 if ser.in_waiting > 0:
-                    # Read lines returns a list of bytes ending in \n
                     raw_lines = ser.readlines() 
                     
                     for raw_line in raw_lines:
                         try:
                             decoded_line = raw_line.decode('utf-8', errors='ignore')
-                            # Clean control chars
                             clean_line = re.sub(r'[\x00-\x1F\x7F]', '', decoded_line).strip()
                             
                             if clean_line:
@@ -247,30 +215,21 @@ if st.session_state['logging_active']:
                         except:
                             continue
 
-                    # 2. THROTTLE UI UPDATES (Optimization)
-                    # Only update screen every 0.5 seconds, regardless of data speed
                     current_time = time.time()
                     if current_time - last_ui_update_time > 0.5:
-                        
-                        # Calculate totals
                         current_total = total_session_rows + len(buffer)
-                        
-                        # Get last valid reading
                         last_reading = buffer[-1]['Response'] if buffer else "-"
                         
-                        # Update Cards
                         last_val_placeholder.markdown(make_card_html("Last Reading", last_reading, "Raw Value"), unsafe_allow_html=True)
                         count_placeholder.markdown(make_card_html("Rows Logged", str(current_total), "Session Total"), unsafe_allow_html=True)
                         
-                        # Update Table
                         if buffer:
                             preview_df = pd.DataFrame(buffer[-10:])
-                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S.%f').str[:-3] # Show milliseconds
+                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S.%f').str[:-3]
                             table_placeholder.dataframe(preview_df, use_container_width=True)
                         
                         last_ui_update_time = current_time
 
-                    # 3. SAVE BATCH (Optimization)
                     if len(buffer) >= batch_size:
                         status_placeholder.markdown(make_card_html("Status", "Saving...", "Writing to Disk"), unsafe_allow_html=True)
                         
@@ -286,21 +245,29 @@ if st.session_state['logging_active']:
                             total_session_rows += len(buffer)
                             st.session_state['sheet_index'] = new_idx
                             st.session_state['row_count'] = new_cnt
-                            buffer = [] # Clear buffer
+                            buffer = [] 
                             status_placeholder.markdown(make_card_html("Status", "Active", "Collecting Data"), unsafe_allow_html=True)
                         else:
                             st.error("Failed to save data. Stopping to prevent data loss.")
                             break
                 else:
-                    # Tiny sleep to prevent CPU spiking to 100% when idle
                     time.sleep(0.01)
 
-            except serial.SerialException:
-                st.error("Device disconnected abruptly.")
+            except serial.SerialException as e:
+                st.error(f"Device disconnected: {e}")
                 break
                 
+    except serial.SerialException as e:
+        # Specific error handling for port issues
+        if "Access is denied" in str(e):
+            st.error(f"🚫 Access Denied to {serial_port}. It might be open in another program (like Jupyter Notebook). Please close other apps and try again.")
+        elif "FileNotFound" in str(e) or "No such file" in str(e):
+             st.error(f"❌ Could not find port '{serial_port}'. Please check the name and ensure the device is plugged in.")
+        else:
+            st.error(f"Connection Error: {e}")
+        
     except Exception as e:
-        st.error(f"Connection Error: {e}")
+        st.error(f"Unexpected Error: {e}")
         
     finally:
         if 'ser' in locals() and ser.is_open:
