@@ -56,9 +56,10 @@ Bash
     
 2.  Navigate to the folder containing app.py.
     
-3.  Bashstreamlit run app.py
+3.  Bash
+  `streamlit run app.py`
     
-4.  A new tab will automatically open in your default web browser displaying the dashboard.
+5.  A new tab will automatically open in your default web browser displaying the dashboard.
     
 
 📖 User Guide
