@@ -45,7 +45,7 @@ Open your Command Prompt (Windows) or Terminal (Mac/Linux), navigate to your fol
 
 Bash
 
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   pip install streamlit pyserial pandas openpyxl   `
+`   pip install streamlit pyserial pandas openpyxl   `
 
 > **❗ Critical Note:** We use pyserial, **not** serial. If you have previously installed the package named serial, you must uninstall it first using pip uninstall serial to avoid conflicts.
 
