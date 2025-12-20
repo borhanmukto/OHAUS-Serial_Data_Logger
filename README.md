@@ -38,7 +38,7 @@ Before running this application, ensure you have the following installed on your
       
 3.  Bash `pip install streamlit pyserial pandas openpyxl`
 
-⚠️ If the command above fails (Command not found)
+⚠️ **If the command above fails (Command not found)**
 
 If you see an error saying 'pip' is not recognized, it means Python was not added to your system PATH. Use this command instead:
 
