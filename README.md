@@ -57,9 +57,7 @@ If you see an error saying 'pip' is not recognized, it means Python was not adde
 3.  Bash
    `streamlit run app.py`
 ⚠️ If the command above fails
-If your computer does not recognize streamlit, use the Python launcher directly:
-Bash
-`py -m streamlit run app.py`
+If your computer does not recognize streamlit, use the Python launcher directly: Bash `py -m streamlit run app.py`
     
 4.  A new tab should automatically open in your default web browser displaying the application.
     
