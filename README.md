@@ -30,7 +30,7 @@ Before running this application, ensure you have the following installed on your
         
 2.  **Installing Requirements**
 
-    *   Open your Command Prompt (Windows) or Terminal (Mac/Linux).
+    *   Open your Command Prompt or Terminal.
         
     *   Navigate to your folder (e.g., cd Desktop/SerialLogger).
         
