@@ -28,25 +28,23 @@ Before running this application, ensure you have the following installed on your
         
     *   Save the Python script provided in this package inside that folder as **app.py**.
         
-2.  Bash
+2.  **Installing Requirements**
+
+    *   Open your Command Prompt (Windows) or Terminal (Mac/Linux).
+        
+    *   Navigate to your folder (e.g., cd Desktop/SerialLogger).
+        
+    *   Run the following commands:
+      
+3.  Bash
    
    `pip install streamlit pyserial pandas openpyxl`
 
 ⚠️ If the command above fails (Command not found)
 
-If you see an error saying 'pip' is not recognized, it means Python was not added to your system PATH. Use this command instead:
-
-Bash
-
-`py -m pip install streamlit pyserial pandas openpyxl`
+If you see an error saying 'pip' is not recognized, it means Python was not added to your system PATH. Use this command instead; Bash `py -m pip install streamlit pyserial pandas openpyxl`
 
 _(Note: We use pyserial, not serial. If you mistakenly installed serial, uninstall it first.)_
-    
-    *   Open your Command Prompt (Windows) or Terminal (Mac/Linux).
-        
-    *   Navigate to your folder (e.g., cd Desktop/SerialLogger).
-        
-    *   Run the following command:
         
 
 🚀 How to Run
