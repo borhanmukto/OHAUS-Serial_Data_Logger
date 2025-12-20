@@ -45,8 +45,8 @@ if 'row_count' not in st.session_state:
 # --- Helper Functions ---
 def get_available_ports():
     """Scans and returns a list of available COM ports."""
-    ports = serial.tools.list_ports.comports()
-    return [port.device for port in ports]
+    # Return the full port objects, not just names, for better detection info
+    return serial.tools.list_ports.comports()
 
 def make_card_html(label, value, sub_text=""):
     return f"""
@@ -102,7 +102,24 @@ available_ports = get_available_ports()
 force_manual = st.sidebar.checkbox("My port is not listed / Enter manually")
 
 if available_ports and not force_manual:
-    serial_port = st.sidebar.selectbox("Serial Port", available_ports, index=0)
+    # Auto-detect logic: Try to select the most likely candidate (USB Serial)
+    default_index = 0
+    # Heuristic: Prefer ports with "USB" in description, or the last one in the list (usually newest)
+    for i, port in enumerate(available_ports):
+        if "USB" in port.description:
+            default_index = i
+    
+    # If no specific "USB" port found, but list exists, default to the last one (often the external device)
+    if default_index == 0 and len(available_ports) > 1 and "USB" not in available_ports[0].description:
+        default_index = len(available_ports) - 1
+
+    selected_port_obj = st.sidebar.selectbox(
+        "Serial Port", 
+        available_ports, 
+        index=default_index,
+        format_func=lambda p: f"{p.device} ({p.description})"
+    )
+    serial_port = selected_port_obj.device
 else:
     # Manual Entry Mode
     if not available_ports:
