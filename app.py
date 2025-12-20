@@ -37,15 +37,10 @@ st.markdown("""
 # --- Session State Initialization ---
 if 'logging_active' not in st.session_state:
     st.session_state['logging_active'] = False
-if 'sheet_index' not in st.session_state:
-    st.session_state['sheet_index'] = 1
-if 'row_count' not in st.session_state:
-    st.session_state['row_count'] = 0
 
 # --- Helper Functions ---
 def get_available_ports():
     """Scans and returns a list of available COM ports."""
-    # Return the full port objects, not just names, for better detection info
     return serial.tools.list_ports.comports()
 
 def make_card_html(label, value, sub_text=""):
@@ -57,41 +52,6 @@ def make_card_html(label, value, sub_text=""):
     </div>
     """
 
-def save_to_excel_optimized(filename, data, max_rows, current_sheet_idx, current_row_cnt):
-    """Optimized Saver: Uses passed-in row counts instead of reading the file."""
-    if not data:
-        return False, current_sheet_idx, current_row_cnt
-    
-    df_batch = pd.DataFrame(data)
-    batch_len = len(df_batch)
-    
-    if current_row_cnt + batch_len > max_rows:
-        current_sheet_idx += 1
-        current_row_cnt = 0
-        write_header = True
-        start_row = 0
-    else:
-        write_header = (current_row_cnt == 0)
-        start_row = current_row_cnt + (1 if not write_header else 0)
-
-    sheet_name = f"Sheet{current_sheet_idx}"
-    mode = 'a' if os.path.exists(filename) else 'w'
-    if_sheet_exists = 'overlay' if mode == 'a' else None
-
-    try:
-        with pd.ExcelWriter(filename, engine='openpyxl', mode=mode, if_sheet_exists=if_sheet_exists) as writer:
-            df_batch.to_excel(
-                writer, 
-                sheet_name=sheet_name, 
-                index=False, 
-                header=write_header, 
-                startrow=start_row
-            )
-        return True, current_sheet_idx, current_row_cnt + batch_len
-    except Exception as e:
-        st.error(f"Failed to save to Excel: {e}")
-        return False, current_sheet_idx, current_row_cnt
-
 # --- Sidebar Configuration ---
 st.sidebar.header("⚙️ Configuration")
 
@@ -102,17 +62,12 @@ available_ports = get_available_ports()
 force_manual = st.sidebar.checkbox("My port is not listed / Enter manually")
 
 if available_ports and not force_manual:
-    # Auto-detect logic: Try to select the most likely candidate (USB Serial)
     default_index = 0
-    # Heuristic: Prefer ports with "USB" in description, or the last one in the list (usually newest)
+    # Heuristic: Prefer ports with "USB" in description
     for i, port in enumerate(available_ports):
         if "USB" in port.description:
             default_index = i
-    
-    # If no specific "USB" port found, but list exists, default to the last one (often the external device)
-    if default_index == 0 and len(available_ports) > 1 and "USB" not in available_ports[0].description:
-        default_index = len(available_ports) - 1
-
+            
     selected_port_obj = st.sidebar.selectbox(
         "Serial Port", 
         available_ports, 
@@ -121,19 +76,17 @@ if available_ports and not force_manual:
     )
     serial_port = selected_port_obj.device
 else:
-    # Manual Entry Mode
     if not available_ports:
         st.sidebar.warning("No COM ports detected automatically.")
     
-    raw_port = st.sidebar.text_input("Manually Enter Port (e.g., COM4)", "COM4")
-    # CRITICAL FIX: Strip spaces and ensure uppercase for Windows consistency
-    serial_port = raw_port.strip().upper() 
+    raw_port = st.sidebar.text_input("Manually Enter Port (e.g., COM5)", "COM5")
+    serial_port = raw_port.strip().upper()
 
 baud_rate = st.sidebar.number_input("Baud Rate", value=9600, step=100)
-output_filename = st.sidebar.text_input("Output Filename", "Desorption_Data.xlsx")
+output_filename = st.sidebar.text_input("Output Filename", "Desorption trial 1.xlsx")
 
 st.sidebar.subheader("Performance Settings")
-batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=2000, min_value=100, step=100)
+batch_size = st.sidebar.number_input("Batch Size", value=500, min_value=10, step=10)
 max_rows_per_sheet = st.sidebar.number_input("Max Rows Per Sheet", value=800000)
 
 # --- Main UI ---
@@ -173,132 +126,155 @@ if stop_btn:
 
 if start_btn:
     st.session_state['logging_active'] = True
-    st.session_state['sheet_index'] = 1
-    st.session_state['row_count'] = 0
-    
-    if os.path.exists(output_filename):
-        try:
-            with pd.ExcelFile(output_filename) as xls:
-                last_sheet = xls.sheet_names[-1]
-                match = re.search(r'Sheet(\d+)', last_sheet)
-                if match:
-                    st.session_state['sheet_index'] = int(match.group(1))
-                df_last = pd.read_excel(xls, sheet_name=last_sheet)
-                st.session_state['row_count'] = len(df_last)
-        except:
-            pass 
 
 if st.session_state['logging_active']:
     
     status_placeholder.markdown(make_card_html("Status", "Connecting...", "Initializing"), unsafe_allow_html=True)
     
+    ser = None
     try:
-        # Try to open the port
+        # 1. Establish Connection (Exact logic from snippet)
         ser = serial.Serial(
             port=serial_port,
             baudrate=baud_rate,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
             bytesize=serial.EIGHTBITS,
-            timeout=0.1
+            timeout=1  # Reverted to 1s as per snippet
         )
         
-        # Send Command
-        time.sleep(1) 
-        ser.write("CP\r\n".encode('utf-8'))
-        
-        status_placeholder.markdown(make_card_html("Status", "Active", "Connected"), unsafe_allow_html=True)
-        st.toast(f"Connected to {serial_port}")
+        status_placeholder.markdown(make_card_html("Status", "Active", f"Connected to {serial_port}"), unsafe_allow_html=True)
+        st.toast(f"✅ Successfully connected to port {ser.portstr}")
 
-        buffer = []
-        last_ui_update_time = time.time()
-        total_session_rows = 0
-        
-        while True:
+        # 2. Send Command (Exact logic from snippet)
+        if ser and ser.is_open:
             try:
-                if ser.in_waiting > 0:
-                    raw_lines = ser.readlines() 
-                    
-                    for raw_line in raw_lines:
-                        try:
-                            decoded_line = raw_line.decode('utf-8', errors='ignore')
-                            clean_line = re.sub(r'[\x00-\x1F\x7F]', '', decoded_line).strip()
-                            
-                            if clean_line:
-                                buffer.append({
-                                    'Timestamp': datetime.now(), 
-                                    'Response': clean_line
-                                })
-                        except:
-                            continue
+                command = "CP\r\n"
+                ser.write(command.encode('utf-8'))
+                time.sleep(0.5) # Wait for device
+            except Exception as e:
+                st.error(f"❌ Error sending command: {e}")
 
-                    current_time = time.time()
-                    if current_time - last_ui_update_time > 0.5:
-                        current_total = total_session_rows + len(buffer)
-                        last_reading = buffer[-1]['Response'] if buffer else "-"
+        # 3. Initialization for File Handling
+        data_batch = []
+        sheet_index = 1
+        row_count = 0
+        
+        # Check existing file to resume logging (Logic from snippet)
+        if os.path.exists(output_filename):
+            try:
+                with pd.ExcelFile(output_filename) as xls:
+                    last_sheet_name = xls.sheet_names[-1]
+                    # Extract number from "Sheet1", "Sheet2" etc
+                    match = re.search(r'Sheet(\d+)', last_sheet_name)
+                    if match:
+                        sheet_index = int(match.group(1))
+                    
+                    df_last = pd.read_excel(xls, sheet_name=last_sheet_name)
+                    row_count = len(df_last)
+                    
+                    if row_count >= max_rows_per_sheet:
+                        sheet_index += 1
+                        row_count = 0
+                st.toast(f"Resuming log on Sheet{sheet_index} at row {row_count + 1}")
+            except Exception as e:
+                st.warning(f"Could not inspect existing file. Starting fresh. Error: {e}")
+
+        # 4. Main Loop
+        last_ui_update = time.time()
+        
+        while st.session_state['logging_active']:
+            try:
+                # Read line (blocking up to timeout=1s)
+                raw_response = ser.readline().decode('utf-8', errors='ignore')
+                
+                # Regex cleaning (Exact logic from snippet)
+                response = re.sub(r'[\x00-\x1F\x7F]', '', raw_response).strip()
+
+                if response:
+                    timestamp = datetime.now()
+                    data_batch.append({'Timestamp': timestamp, 'Response': response})
+                    
+                    # Update UI (Throttled to prevent lag, similar to 'status update interval' but faster for UI)
+                    if time.time() - last_ui_update > 0.5:
+                        current_total_estimate = row_count + len(data_batch)
+                        last_val_placeholder.markdown(make_card_html("Last Reading", response, "Raw Value"), unsafe_allow_html=True)
+                        count_placeholder.markdown(make_card_html("Rows Logged", f"~{current_total_estimate}", f"Sheet{sheet_index}"), unsafe_allow_html=True)
                         
-                        last_val_placeholder.markdown(make_card_html("Last Reading", last_reading, "Raw Value"), unsafe_allow_html=True)
-                        count_placeholder.markdown(make_card_html("Rows Logged", str(current_total), "Session Total"), unsafe_allow_html=True)
-                        
-                        if buffer:
-                            preview_df = pd.DataFrame(buffer[-10:])
-                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S.%f').str[:-3]
+                        # Update Table
+                        preview_df = pd.DataFrame(data_batch[-10:])
+                        if not preview_df.empty:
+                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S')
                             table_placeholder.dataframe(preview_df, use_container_width=True)
                         
-                        last_ui_update_time = current_time
+                        last_ui_update = time.time()
 
-                    if len(buffer) >= batch_size:
-                        status_placeholder.markdown(make_card_html("Status", "Saving...", "Writing to Disk"), unsafe_allow_html=True)
-                        
-                        success, new_idx, new_cnt = save_to_excel_optimized(
-                            output_filename, 
-                            buffer, 
-                            max_rows_per_sheet,
-                            st.session_state['sheet_index'],
-                            st.session_state['row_count']
+                # Batch Saving (Exact logic from snippet)
+                if len(data_batch) >= batch_size:
+                    status_placeholder.markdown(make_card_html("Status", "Saving...", "Writing to Disk"), unsafe_allow_html=True)
+                    
+                    current_sheet_name = f"Sheet{sheet_index}"
+                    df_batch = pd.DataFrame(data_batch)
+                    
+                    write_mode = 'a' if os.path.exists(output_filename) else 'w'
+                    if_sheet_exists = 'overlay' if write_mode == 'a' else None
+                    write_header = not os.path.exists(output_filename) or row_count == 0
+
+                    with pd.ExcelWriter(output_filename, engine='openpyxl', mode=write_mode, if_sheet_exists=if_sheet_exists) as writer:
+                        df_batch.to_excel(
+                            writer, 
+                            sheet_name=current_sheet_name, 
+                            index=False, 
+                            header=write_header, 
+                            startrow=row_count if write_header else row_count + 1
                         )
-                        
-                        if success:
-                            total_session_rows += len(buffer)
-                            st.session_state['sheet_index'] = new_idx
-                            st.session_state['row_count'] = new_cnt
-                            buffer = [] 
-                            status_placeholder.markdown(make_card_html("Status", "Active", "Collecting Data"), unsafe_allow_html=True)
-                        else:
-                            st.error("Failed to save data. Stopping to prevent data loss.")
-                            break
-                else:
-                    time.sleep(0.01)
+                    
+                    row_count += len(data_batch)
+                    data_batch.clear()
+                    
+                    status_placeholder.markdown(make_card_html("Status", "Active", "Collecting Data"), unsafe_allow_html=True)
+
+                    # Check for Sheet Overflow
+                    if row_count >= max_rows_per_sheet:
+                        st.toast(f"Sheet{sheet_index} is full. Switching to Sheet{sheet_index + 1}.")
+                        sheet_index += 1
+                        row_count = 0
 
             except serial.SerialException as e:
-                st.error(f"Device disconnected: {e}")
+                st.error(f"Serial connection error: {e}")
                 break
                 
-    except serial.SerialException as e:
-        # Specific error handling for port issues
-        if "Access is denied" in str(e):
-            st.error(f"🚫 Access Denied to {serial_port}. It might be open in another program (like Jupyter Notebook). Please close other apps and try again.")
-        elif "FileNotFound" in str(e) or "No such file" in str(e):
-             st.error(f"❌ Could not find port '{serial_port}'. Please check the name and ensure the device is plugged in.")
-        else:
-            st.error(f"Connection Error: {e}")
-        
     except Exception as e:
-        st.error(f"Unexpected Error: {e}")
+        st.error(f"Connection Error: {e}")
         
     finally:
-        if 'ser' in locals() and ser.is_open:
-            ser.close()
+        # Cleanup block (Saving remaining data)
+        if 'data_batch' in locals() and data_batch:
+            st.info(f"Saving {len(data_batch)} remaining records...")
+            current_sheet_name = f"Sheet{sheet_index}"
+            df_batch = pd.DataFrame(data_batch)
+            write_mode = 'a' if os.path.exists(output_filename) else 'w'
+            if_sheet_exists = 'overlay' if write_mode == 'a' else None
+            write_header = not os.path.exists(output_filename) or row_count == 0
             
-        if 'buffer' in locals() and buffer:
-            st.info(f"Saving {len(buffer)} remaining rows...")
-            save_to_excel_optimized(
-                output_filename, buffer, max_rows_per_sheet,
-                st.session_state['sheet_index'], st.session_state['row_count']
-            )
+            try:
+                with pd.ExcelWriter(output_filename, engine='openpyxl', mode=write_mode, if_sheet_exists=if_sheet_exists) as writer:
+                    df_batch.to_excel(
+                        writer, 
+                        sheet_name=current_sheet_name, 
+                        index=False, 
+                        header=write_header, 
+                        startrow=row_count if write_header else row_count + 1
+                    )
+            except Exception as e:
+                st.error(f"Error saving final batch: {e}")
+        
+        if ser and ser.is_open:
+            ser.close()
             
         status_placeholder.markdown(make_card_html("Status", "Stopped", "Connection Closed"), unsafe_allow_html=True)
         st.session_state['logging_active'] = False
+        st.success("Logging session finished.")
 
 else:
     status_placeholder.markdown(make_card_html("Status", "Idle", "Ready to Start"), unsafe_allow_html=True)
