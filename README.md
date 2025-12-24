@@ -1,5 +1,6 @@
 ⚖️ Ohaus Scale Serial Data Logger
 =================================
+<img width="1900" height="918" alt="image" src="https://github.com/user-attachments/assets/559f7acf-71c1-4e9a-befb-aaaab468c61e" />
 
 This application logs data from a serial device (specifically configured for Ohaus scales) and saves it to an Excel file in real-time. It features a live data dashboard, batch buffering for high-speed data, and automatic sheet switching in Excel to handle large datasets.
 
@@ -108,7 +109,7 @@ If your computer does not recognize streamlit, use the Python launcher directly:
 
 *   Increase the **Batch Size** in the sidebar settings. Writing to Excel is slow; doing it less frequently improves performance.
 
-<img width="1900" height="918" alt="image" src="https://github.com/user-attachments/assets/559f7acf-71c1-4e9a-befb-aaaab468c61e" />
+
 
 
     
