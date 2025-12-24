@@ -9,7 +9,7 @@ from datetime import datetime
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Serial Data Logger",
+    page_title="Serial Data Logger (CSV)",
     page_icon="⚖️",
     layout="wide"
 )
@@ -61,10 +61,8 @@ st.markdown("""
 # --- Session State Initialization ---
 if 'logging_active' not in st.session_state:
     st.session_state['logging_active'] = False
-# We use session state to persist "Sheet Index" and "Current Row Count" 
-# so we don't have to read the massive Excel file every time we write.
-if 'sheet_index' not in st.session_state:
-    st.session_state['sheet_index'] = 1
+
+# We track row count to display progress
 if 'row_count' not in st.session_state:
     st.session_state['row_count'] = 0
 
@@ -83,47 +81,27 @@ def make_card_html(label, value, sub_text=""):
     </div>
     """
 
-def save_to_excel_optimized(filename, data, max_rows, current_sheet_idx, current_row_cnt):
+def save_to_csv_append(filename, data):
     """
-    Optimized Saver: Uses passed-in row counts instead of reading the file.
-    Returns: (success, new_sheet_index, new_row_count)
+    Appends data to CSV. 
+    Writes header only if file does not exist.
     """
     if not data:
-        return False, current_sheet_idx, current_row_cnt
+        return False
     
-    df_batch = pd.DataFrame(data)
-    batch_len = len(df_batch)
-    
-    # Logic to switch sheets if this batch would overflow
-    if current_row_cnt + batch_len > max_rows:
-        current_sheet_idx += 1
-        current_row_cnt = 0
-        write_header = True
-        start_row = 0
-    else:
-        # If it's a new file or new sheet (row_count 0), write header
-        write_header = (current_row_cnt == 0)
-        start_row = current_row_cnt + (1 if not write_header else 0)
-
-    sheet_name = f"Sheet{current_sheet_idx}"
-    
-    # Check if file exists to determine mode
-    mode = 'a' if os.path.exists(filename) else 'w'
-    if_sheet_exists = 'overlay' if mode == 'a' else None
-
     try:
-        with pd.ExcelWriter(filename, engine='openpyxl', mode=mode, if_sheet_exists=if_sheet_exists) as writer:
-            df_batch.to_excel(
-                writer, 
-                sheet_name=sheet_name, 
-                index=False, 
-                header=write_header, 
-                startrow=start_row
-            )
-        return True, current_sheet_idx, current_row_cnt + batch_len
+        df_batch = pd.DataFrame(data)
+        
+        # Check if file exists to determine if we need a header
+        file_exists = os.path.isfile(filename)
+        
+        # Append mode 'a', no index, header only if new file
+        df_batch.to_csv(filename, mode='a', index=False, header=not file_exists)
+        
+        return True
     except Exception as e:
-        st.error(f"Failed to save to Excel: {e}")
-        return False, current_sheet_idx, current_row_cnt
+        st.error(f"Failed to save to CSV: {e}")
+        return False
 
 # --- Sidebar Configuration ---
 st.sidebar.header("⚙️ Configuration")
@@ -139,15 +117,15 @@ else:
     serial_port = st.sidebar.text_input("Manually Enter Port", "COM5")
 
 baud_rate = st.sidebar.number_input("Baud Rate", value=9600, step=100)
-output_filename = st.sidebar.text_input("Output Filename", "Desorption_Data.xlsx")
+
+# UPDATED: Default to CSV
+output_filename = st.sidebar.text_input("Output Filename", "Desorption_Data.csv")
 
 st.sidebar.subheader("Performance Settings")
-# INCREASED DEFAULT BATCH SIZE for 500Hz data
-batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=2000, min_value=100, step=100, help="For 500Hz, use at least 2000-5000.")
-max_rows_per_sheet = st.sidebar.number_input("Max Rows Per Sheet", value=800000)
+batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=500, min_value=100, step=100, help="Number of readings to collect before writing to CSV.")
 
 # --- Main UI ---
-st.title("⚖️ Ohaus Scale Data Logger")
+st.title("⚖️ Ohaus Scale Data Logger (CSV)")
 
 st.markdown("""
     <div style='text-align: center; margin-bottom: 20px;'>
@@ -183,21 +161,17 @@ if stop_btn:
 
 if start_btn:
     st.session_state['logging_active'] = True
-    # Reset tracking on start (optional: or logic to append to existing)
-    st.session_state['sheet_index'] = 1
     st.session_state['row_count'] = 0
     
-    # Check if file exists to initialize row count correctly (Basic check)
+    # UPDATED: Check existing CSV file to resume count
     if os.path.exists(output_filename):
         try:
-            with pd.ExcelFile(output_filename) as xls:
-                last_sheet = xls.sheet_names[-1]
-                match = re.search(r'Sheet(\d+)', last_sheet)
-                if match:
-                    st.session_state['sheet_index'] = int(match.group(1))
-                df_last = pd.read_excel(xls, sheet_name=last_sheet)
-                st.session_state['row_count'] = len(df_last)
-        except:
+            # Fast line count without loading the whole file into memory
+            with open(output_filename, 'rb') as f:
+                row_count = sum(1 for _ in f)
+            # Subtract 1 for header if count > 0
+            st.session_state['row_count'] = max(0, row_count - 1) if row_count > 0 else 0
+        except Exception:
             pass # Start fresh if error reading
 
 if st.session_state['logging_active']:
@@ -223,20 +197,19 @@ if st.session_state['logging_active']:
 
         buffer = []
         last_ui_update_time = time.time()
-        total_session_rows = 0
         
         while True:
+            if not st.session_state['logging_active']:
+                break
+
             try:
-                # 1. READ ALL AVAILABLE DATA (High Speed Optimization)
-                # Instead of reading 1 line, we read everything in the hardware buffer
+                # 1. READ ALL AVAILABLE DATA
                 if ser.in_waiting > 0:
-                    # Read lines returns a list of bytes ending in \n
                     raw_lines = ser.readlines() 
                     
                     for raw_line in raw_lines:
                         try:
                             decoded_line = raw_line.decode('utf-8', errors='ignore')
-                            # Clean control chars
                             clean_line = re.sub(r'[\x00-\x1F\x7F]', '', decoded_line).strip()
                             
                             if clean_line:
@@ -247,15 +220,12 @@ if st.session_state['logging_active']:
                         except:
                             continue
 
-                    # 2. THROTTLE UI UPDATES (Optimization)
-                    # Only update screen every 0.5 seconds, regardless of data speed
+                    # 2. THROTTLE UI UPDATES
                     current_time = time.time()
                     if current_time - last_ui_update_time > 0.5:
                         
-                        # Calculate totals
-                        current_total = total_session_rows + len(buffer)
+                        current_total = st.session_state['row_count'] + len(buffer)
                         
-                        # Get last valid reading
                         last_reading = buffer[-1]['Response'] if buffer else "-"
                         
                         # Update Cards
@@ -265,60 +235,53 @@ if st.session_state['logging_active']:
                         # Update Table
                         if buffer:
                             preview_df = pd.DataFrame(buffer[-10:])
-                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S.%f').str[:-3] # Show milliseconds
+                            preview_df['Timestamp'] = preview_df['Timestamp'].dt.strftime('%H:%M:%S.%f').str[:-3]
                             table_placeholder.dataframe(preview_df, use_container_width=True)
                         
                         last_ui_update_time = current_time
 
-                    # 3. SAVE BATCH (Optimization)
+                    # 3. SAVE BATCH (CSV Logic)
                     if len(buffer) >= batch_size:
-                        status_placeholder.markdown(make_card_html("Status", "Saving...", "Writing to Disk"), unsafe_allow_html=True)
+                        status_placeholder.markdown(make_card_html("Status", "Saving...", "Writing to CSV"), unsafe_allow_html=True)
                         
-                        success, new_idx, new_cnt = save_to_excel_optimized(
-                            output_filename, 
-                            buffer, 
-                            max_rows_per_sheet,
-                            st.session_state['sheet_index'],
-                            st.session_state['row_count']
-                        )
+                        success = save_to_csv_append(output_filename, buffer)
                         
                         if success:
-                            total_session_rows += len(buffer)
-                            st.session_state['sheet_index'] = new_idx
-                            st.session_state['row_count'] = new_cnt
+                            st.session_state['row_count'] += len(buffer)
                             buffer = [] # Clear buffer
                             status_placeholder.markdown(make_card_html("Status", "Active", "Collecting Data"), unsafe_allow_html=True)
                         else:
                             st.error("Failed to save data. Stopping to prevent data loss.")
+                            st.session_state['logging_active'] = False
                             break
                 else:
-                    # Tiny sleep to prevent CPU spiking to 100% when idle
                     time.sleep(0.01)
 
             except serial.SerialException:
                 st.error("Device disconnected abruptly.")
+                st.session_state['logging_active'] = False
                 break
                 
     except Exception as e:
         st.error(f"Connection Error: {e}")
+        st.session_state['logging_active'] = False
         
     finally:
         if 'ser' in locals() and ser.is_open:
             ser.close()
             
+        # Save remaining data
         if 'buffer' in locals() and buffer:
             st.info(f"Saving {len(buffer)} remaining rows...")
-            save_to_excel_optimized(
-                output_filename, buffer, max_rows_per_sheet,
-                st.session_state['sheet_index'], st.session_state['row_count']
-            )
+            success = save_to_csv_append(output_filename, buffer)
+            if success:
+                st.session_state['row_count'] += len(buffer)
             
         status_placeholder.markdown(make_card_html("Status", "Stopped", "Connection Closed"), unsafe_allow_html=True)
-        st.session_state['logging_active'] = False
 
 else:
     status_placeholder.markdown(make_card_html("Status", "Idle", "Ready to Start"), unsafe_allow_html=True)
-    count_placeholder.markdown(make_card_html("Rows Logged", "0", "-"), unsafe_allow_html=True)
+    count_placeholder.markdown(make_card_html("Rows Logged", str(st.session_state['row_count']), "Session Total"), unsafe_allow_html=True)
     last_val_placeholder.markdown(make_card_html("Last Reading", "-", "-"), unsafe_allow_html=True)
     
     st.info("Configure settings in the sidebar and press Start.")
