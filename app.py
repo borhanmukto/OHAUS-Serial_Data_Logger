@@ -9,7 +9,7 @@ from datetime import datetime
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Serial Data Logger (CSV)",
+    page_title="Serial Data Logger",
     page_icon="⚖️",
     layout="wide"
 )
@@ -125,7 +125,7 @@ st.sidebar.subheader("Performance Settings")
 batch_size = st.sidebar.number_input("Batch Size (Rows to buffer)", value=500, min_value=100, step=100, help="Number of readings to collect before writing to CSV.")
 
 # --- Main UI ---
-st.title("⚖️ Ohaus Scale Data Logger (CSV)")
+st.title("⚖️ Ohaus Scale Data Logger")
 
 st.markdown("""
     <div style='text-align: center; margin-bottom: 20px;'>
