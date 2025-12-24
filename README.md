@@ -107,6 +107,9 @@ If your computer does not recognize streamlit, use the Python launcher directly:
 **Data is lagging:**
 
 *   Increase the **Batch Size** in the sidebar settings. Writing to Excel is slow; doing it less frequently improves performance.
+
+*   <img width="1911" height="921" alt="image" src="https://github.com/user-attachments/assets/1668feb0-367c-4f08-9a96-21c710f4a6e1" />
+
     
 
 ### Developed with Python & Streamlit
